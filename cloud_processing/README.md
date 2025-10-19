@@ -172,11 +172,24 @@ python realtime_text.py voice.m4a
 ```
 
 ### macOS 实时多命令模式（`mac_realtime_multi.py`）
+
+#### 查看可用麦克风设备
 ```zsh
-python mac_realtime_multi.py --print-stt
-# 可通过 --device 指定麦克风索引；不指定将自动选择可用的输入设备。
+# 1) 先看看你的麦克风索引
+python -c "import sounddevice as sd; print(sd.query_devices())"
 ```
-支持 `.env` 中配置：
+
+#### 运行实时语音识别
+```zsh
+# 2) 运行（可选指定设备索引）
+python mac_realtime_multi.py --device 2 --print-stt
+# 系统会第一次提示给终端麦克风权限：在 系统设置 → 隐私与安全性 → 麦克风 勾上你的终端
+
+# 不指定设备索引时，将自动选择可用的输入设备
+python mac_realtime_multi.py --print-stt
+```
+
+#### 支持的环境变量配置（`.env` 文件）
 - GITHUB_TOKEN, OPENAI_BASE_URL, OPENAI_MODEL
 - WHISPER_MODEL, WHISPER_DEV, WHISPER_CT, LANG_HINT
 - SAMPLE_RATE, CHANNELS, FRAME_MS, MAX_SEG_SEC
