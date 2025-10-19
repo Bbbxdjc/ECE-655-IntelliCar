@@ -1,0 +1,5 @@
+faster-whisper>=1.0.0
+openai>=1.50.0
+numpy>=1.23.0
+python-dotenv>=1.0.0
+sounddevice>=0.4.6
