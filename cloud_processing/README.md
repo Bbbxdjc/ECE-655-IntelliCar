@@ -6,13 +6,15 @@
 - 输入：
   - 文字（直接传入）
   - 音频文件（.m4a 或 .wav；自动将 .m4a 转为 16kHz 单声道 WAV 再转写）
+  - 麦克风（实时，自动分段并解析为多条命令）
 - 语音转文字：faster-whisper（本地运行）
 - NLU 解析：GitHub Models（OpenAI Chat Completions API 兼容）
 - 输出：严格、最小化的 JSON 指令，仅包含允许字段
 - 本地强校验：动作与字段的必填/禁填、类型/范围检查，出错直接退出
 
 ## 目录结构
-- `realtime_text.py` 主程序
+- `realtime_text.py` 文本/音频文件 → 单命令解析（一次一句）
+- `mac_realtime_multi.py` 实时麦克风 → 多命令解析（每段语音输出命令数组）
 
 ## 运行环境与依赖
 - 系统：macOS（其他平台理论可行，命令略有差异）
@@ -43,9 +45,9 @@ pip install faster-whisper openai numpy
 ```
 
 ## 配置
-脚本中默认的关键常量（可在 `.env` 或 `realtime_text.py` 顶部修改）：
+脚本中默认的关键常量（可在 `.env` 或脚本顶部修改）：
 - ENDPOINT / OPENAI_BASE_URL: 默认 `https://models.github.ai/inference`
-- MODEL_NAME / OPENAI_MODEL: 默认 `openai/gpt-4o`
+- MODEL_NAME / OPENAI_MODEL: 默认 `openai/gpt-4o-mini`
 - WHISPER_MODEL: 默认 `base`（可选 tiny/base/small/medium）
 - WHISPER_DEV: 默认 `cpu`
 - WHISPER_CT: 默认 `int8`
@@ -53,6 +55,30 @@ pip install faster-whisper openai numpy
 - ACTIONS: `{forward, backward, left, right, stop}`
 - SPEEDS: `{L0, L1, L2, L3}`
 - MAX_DURATION: 默认 `30000` 毫秒
+
+## 环境变量与 .env 配置（必看）
+本项目在运行时会通过 `python-dotenv` 自动加载 `cloud_processing/.env`。你需要在该目录下新建一个 `.env` 文件，写入以下内容（不要提交到仓库）：
+
+```
+# 必填：GitHub Models 的访问令牌（有 models 权限）
+GITHUB_TOKEN=<你的 GitHub Token>
+
+# 可选：如不填，代码会使用默认值
+OPENAI_BASE_URL=https://models.github.ai/inference
+OPENAI_MODEL=openai/gpt-4o-mini
+
+# 可选：Whisper 本地转写配置
+WHISPER_MODEL=base
+WHISPER_DEV=cpu
+WHISPER_CT=int8
+# LANG_HINT=zh   # 如需固定中文，可取消注释
+```
+
+说明与建议：
+- `.env` 行内不需要引号；推荐不在等号两侧留空格。
+- `.env` 支持 `#` 开头的注释行。
+- 请勿将 `.env` 提交到仓库（将其加入 `.gitignore`）。
+- `mac_realtime_multi.py` 会自动执行 `load_dotenv()`，直接读取上述变量。
 
 ### 身份凭证（强烈建议改为环境变量）
 当前文件中的 `ensure_token()` 写死了一个 token，仅用于演示。为安全起见，建议：
@@ -78,7 +104,7 @@ export GITHUB_TOKEN="<你的 GitHub Models 访问令牌>"
 # 或在 cloud_processing/.env 中填写：
 # GITHUB_TOKEN=<你的令牌>
 # OPENAI_BASE_URL=https://models.github.ai/inference
-# OPENAI_MODEL=openai/gpt-4o
+# OPENAI_MODEL=openai/gpt-4o-mini
 # WHISPER_MODEL=base
 # WHISPER_DEV=cpu
 # WHISPER_CT=int8
@@ -173,6 +199,14 @@ python realtime_text.py voice.m4a
 
 ### macOS 实时多命令模式（`mac_realtime_multi.py`）
 
+该模式会把每一个语音段解析为一个命令数组，并逐条输出，每条一行紧凑 JSON。例如会连续打印：
+
+```
+{"action":"forward","duration_ms":2000,"angle_deg":null,"speed":"L2"}
+{"action":"left","duration_ms":null,"angle_deg":90,"speed":null}
+{"action":"stop","duration_ms":null,"angle_deg":null,"speed":null}
+```
+
 #### 查看可用麦克风设备
 ```zsh
 # 1) 先看看你的麦克风索引
@@ -189,9 +223,30 @@ python mac_realtime_multi.py --device 2 --print-stt
 python mac_realtime_multi.py --print-stt
 ```
 
-#### 支持的环境变量配置（`.env` 文件）
-- GITHUB_TOKEN, OPENAI_BASE_URL, OPENAI_MODEL
-- WHISPER_MODEL, WHISPER_DEV, WHISPER_CT, LANG_HINT
-- SAMPLE_RATE, CHANNELS, FRAME_MS, MAX_SEG_SEC
-- RMS_WIN_MS, RMS_THRESH_DB, RMS_HANG_MS_ON, RMS_HANG_MS_OFF, RMS_FLOOR_DECAY
-- MAX_DURATION, MAX_COMMANDS, PRINT_STT_DEFAULT
+
+---
+
+## 指令测试参考（中英文示例）
+
+你可以用如下语句测试解析效果，支持自然语言、复合指令和循环：
+
+### 英文示例
+- Go forward for ten seconds
+- Turn around
+- Go backward for 5 seconds
+- Make a square
+- Go forward for 3 seconds, then turn left 90 degrees, then stop
+- Repeat forward 2 seconds and backward 2 seconds four times
+- Turn right 360 degrees three times
+- Go forward for 5 seconds at speed L2
+- Stop
+
+### 中文示例
+- 前进五秒后退五秒重复四次
+- 原地转三圈
+- 前进三秒左转90度然后停止
+- 以L3速度前进十秒
+- 停止
+- 画一个正方形
+- 向右转180度
+- 前进五秒，速度L1

@@ -15,8 +15,8 @@ load_dotenv()
 
 # ================== 配置 ==================
 ENDPOINT      = os.environ.get("OPENAI_BASE_URL", "https://models.github.ai/inference")
-MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o")
-API_KEY       = "GITHUB_TOKEN"
+MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
+API_KEY       = os.environ.get("GITHUB_TOKEN", "")
 
 # Whisper
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
@@ -100,7 +100,7 @@ whisper_lock = threading.Lock()
 
 # ================== 工具函数 ==================
 def ensure_token() -> str:
-    tok = os.environ.get(API_KEY)
+    tok = API_KEY
     if not tok:
         print(f"❌ Env {API_KEY} missing.", file=sys.stderr)
         sys.exit(2)
@@ -207,6 +207,8 @@ def audio_producer(device_idx, print_stt=False):
 
     ring_sil = deque(maxlen=RMS_HANG_MS_OFF // FRAME_MS)
     ring_vox = deque(maxlen=RMS_HANG_MS_ON // FRAME_MS)
+    # 保留最近的音频帧，用于回溯收集
+    recent_frames = deque(maxlen=RMS_HANG_MS_ON // FRAME_MS)
     in_speech = False
     seg_frames = []
     seg_start_t = None
@@ -237,11 +239,17 @@ def audio_producer(device_idx, print_stt=False):
 
             ring_vox.append(is_voiced)
             ring_sil.append(not is_voiced)
+            
+            # 始终保留最近的帧（用于回溯）
+            if not in_speech:
+                recent_frames.append(frame.astype(np.float32))
 
             if not in_speech and len(ring_vox)==ring_vox.maxlen and sum(ring_vox)==len(ring_vox):
                 in_speech = True
-                seg_frames = []
-                seg_start_t = time.time()
+                # 回溯收集之前判定为语音的帧
+                seg_frames = list(recent_frames)
+                # 时间戳也相应往前移
+                seg_start_t = time.time() - (len(recent_frames) * FRAME_MS / 1000.0)
 
             if in_speech:
                 seg_frames.append(frame.astype(np.float32))
@@ -254,6 +262,7 @@ def audio_producer(device_idx, print_stt=False):
                     seg_start_t = None
                     ring_sil.clear()
                     ring_vox.clear()
+                    recent_frames.clear()
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE,

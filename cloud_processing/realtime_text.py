@@ -7,7 +7,7 @@ from openai import OpenAI
 
 # ================== 配置 ==================
 ENDPOINT      = "https://models.github.ai/inference"
-MODEL_NAME    = "openai/gpt-4o"
+MODEL_NAME    = "openai/gpt-4o-mini"
 
 # Whisper 配置
 WHISPER_MODEL = "base"       # "tiny"/"base"/"small"/"medium"
