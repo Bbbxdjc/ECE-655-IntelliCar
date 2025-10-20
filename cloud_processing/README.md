@@ -1,3 +1,38 @@
+
+---
+
+### 复杂英文指令及示例输出
+
+#### go zigzag forward five times.
+```
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+```
+
+#### Drive a 5-pointed star shape.
+```
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"stop","angle_deg":null,"duration_ms":null,"speed":null}
+```
 # Realtime Speech → Structured Driving Command
 
 将语音或文字实时解析为严格结构化的小车驾驶指令。语音在本地用 faster-whisper 转写，转写出的文本通过 GitHub Models（OpenAI 格式 API）解析成 JSON 指令；本地进行强校验并只输出合规 JSON，不做兜底或推断。
@@ -226,6 +261,7 @@ python mac_realtime_multi.py --print-stt
 
 ---
 
+
 ## 指令测试参考（中英文示例）
 
 你可以用如下语句测试解析效果，支持自然语言、复合指令和循环：
@@ -250,3 +286,38 @@ python mac_realtime_multi.py --print-stt
 - 画一个正方形
 - 向右转180度
 - 前进五秒，速度L1
+
+---
+
+### 复杂英文指令及示例输出
+
+#### go zigzag forward five times.
+```
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":45,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"left","angle_deg":45,"duration_ms":null,"speed":null}
+```
+
+#### Drive a 5-pointed star polygon shape.
+```
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"forward","angle_deg":null,"duration_ms":5000,"speed":null}
+{"action":"right","angle_deg":144,"duration_ms":null,"speed":null}
+{"action":"stop","angle_deg":null,"duration_ms":null,"speed":null}
+```

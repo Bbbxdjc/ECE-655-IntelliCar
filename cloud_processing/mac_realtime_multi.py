@@ -42,7 +42,7 @@ RMS_FLOOR_DECAY   = 0.995
 ACTIONS      = {"forward","backward","left","right","stop"}
 SPEEDS       = {"L0","L1","L2","L3"}
 MAX_DURATION = 30_000     # ms
-MAX_COMMANDS = 10         # 一句话内最多多少条
+MAX_COMMANDS = 30         # 一句话内最多多少条
 
 # ================== Structured Outputs（命令数组） ==================
 # 顶层只有 "commands" 一个字段（required），服务端要求 additionalProperties=false。
