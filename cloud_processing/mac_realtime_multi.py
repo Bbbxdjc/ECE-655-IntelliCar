@@ -97,6 +97,8 @@ HANG_OFF_FRAMES = max(1, RMS_HANG_MS_OFF // FRAME_MS)
 stop_event   = threading.Event()
 segments_q   = queue.Queue()
 whisper_lock = threading.Lock()
+segment_counter = 0
+counter_lock = threading.Lock()
 
 # ================== 工具函数 ==================
 def ensure_token() -> str:
@@ -277,10 +279,14 @@ def audio_producer(device_idx, print_stt=False):
             sd.sleep(50)
 
 def finish_segment(frames_list):
+    global segment_counter
     if not frames_list:
         return
     pcm_f32 = np.concatenate(frames_list, axis=0)
-    segments_q.put(pcm_f32)
+    with counter_lock:
+        segment_counter += 1
+        seg_id = segment_counter
+    segments_q.put((seg_id, pcm_f32))
 
 # ================== 消费：Whisper + LLM（数组） ==================
 def consumer_worker(print_stt=False):
@@ -290,7 +296,7 @@ def consumer_worker(print_stt=False):
     model = None
     while not stop_event.is_set():
         try:
-            pcm_f32 = segments_q.get(timeout=0.1)
+            seg_id, pcm_f32 = segments_q.get(timeout=0.1)
         except queue.Empty:
             continue
 
@@ -301,12 +307,12 @@ def consumer_worker(print_stt=False):
                 segs, _ = model.transcribe(pcm_f32, language=LANG_HINT, without_timestamps=True, vad_filter=False)
                 text = "".join(s.text for s in segs).strip()
         except Exception as e:
-            print(f"❌ STT failed: {e}", file=sys.stderr)
+            print(f"❌ STT failed (segment #{seg_id}): {e}", file=sys.stderr)
             segments_q.task_done()
             continue
 
         if print_stt or PRINT_STT_DEFAULT:
-            print(f"👤 STT: {text or '(empty)'}")
+            print(f"👤 STT (segment #{seg_id}): {text or '(empty)'}")
 
         if not text:
             segments_q.task_done()
@@ -314,13 +320,14 @@ def consumer_worker(print_stt=False):
 
         try:
             data = call_model_strict_multi(client, text)
-            # 逐条输出（每条一行 JSON）
+            # 逐条输出（每条一行 JSON，包含 id）
             for cmd in data["commands"]:
+                cmd["id"] = seg_id
                 print(json.dumps(cmd, ensure_ascii=False, separators=(",",":")))
         except SystemExit as e:
-            print(f"❌ Command validation failed: {e}", file=sys.stderr)
+            print(f"❌ Command validation failed (segment #{seg_id}): {e}", file=sys.stderr)
         except Exception as e:
-            print(f"❌ Command pipeline error: {e}", file=sys.stderr)
+            print(f"❌ Command pipeline error (segment #{seg_id}): {e}", file=sys.stderr)
         finally:
             segments_q.task_done()
 
