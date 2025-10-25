@@ -23,18 +23,27 @@ The system recognizes voice commands such as:
 
 ### Output Format
 
-Recognized commands are converted to structured JSON format:
+Recognized commands are converted to structured JSON format compatible with cloud processing:
 
 ```json
 {
-  "task_name": "forward",
-  "params": {
-    "duration_ms": 10000
-  },
-  "source": "local",
-  "confidence": 0.8
+  "action": "forward",
+  "duration_ms": 10000,
+  "angle_deg": null,
+  "speed": null
 }
 ```
+
+**Format Guarantee:**
+
+**All four fields are ALWAYS present in every output.** Fields that don't apply to the current action are explicitly set to `null`. This ensures consistent parsing and validation across all system components.
+
+| Action Type | Required Fields | Null Fields |
+|-------------|----------------|-------------|
+| `forward`, `backward` | `action`, `duration_ms` | `angle_deg` |
+| `left`, `right` | `action`, `angle_deg` | `duration_ms` |
+| `stop` | `action` | `duration_ms`, `angle_deg` |
+| All types | `speed` (optional) | May be `null` |
 
 ---
 
@@ -411,29 +420,66 @@ sudo journalctl -u vosk-recognizer.service -f
 | Block Size | 8000 samples | Audio buffer size |
 | Timeout | 3 seconds | Maximum recognition duration per call |
 
-### Grammar Constraints
+### Grammar Mode Configuration
 
-The grammar list in `vosk_local.py` restricts recognition to expected commands:
+**Grammar mode** restricts recognition to predefined vocabulary, offering trade-offs:
 
+| Aspect | Grammar Mode ON | Grammar Mode OFF |
+|--------|----------------|------------------|
+| **Speed** | 3-5x faster | Standard speed |
+| **Accuracy** | Higher for known phrases | Lower but more flexible |
+| **Vocabulary** | Limited to grammar list | Full language model |
+| **Use Case** | Fixed command set | Natural language |
+
+#### Enabling/Disabling Grammar Mode
+
+**Method 1: Environment Variable**
+```bash
+# Enable (default)
+export VOSK_USE_GRAMMAR=1
+
+# Disable
+export VOSK_USE_GRAMMAR=0
+```
+
+**Method 2: CLI Argument**
+```bash
+# Enable (default)
+python3 vosk_local.py
+
+# Disable
+python3 vosk_local.py --no-grammar
+```
+
+**Recommendation:** Keep grammar mode **ON** for predictable, low-latency command recognition. Disable only when testing freeform speech or debugging recognition issues.
+
+### Grammar Configuration
+
+The module uses shared grammar from `vosk_config.py`:
+
+**GRAMMAR_MINIMAL** (basic commands):
 ```python
-GRAMMAR = [
+["forward", "backward", "turn left", "turn right", 
+ "left", "right", "stop", "halt"]
+```
+
+**GRAMMAR_EXTENDED** (with numbers and units):
+```python
+[
+    # Actions
     "forward", "backward", "turn left", "turn right",
-    "left", "right", "stop", "halt"
+    "left", "right", "stop", "halt",
+    # Prepositions and units
+    "for", "second", "seconds", "degree", "degrees",
+    # Numbers
+    "one", "two", "three", "four", "five", "six", "seven",
+    "eight", "nine", "ten", "fifteen", "twenty", "thirty",
+    "forty", "forty five", "forty-five", "sixty", "ninety",
+    "one hundred", "one hundred eighty"
 ]
 ```
 
-Extended grammar in `vosk_grammar.py` includes numbers and units:
-
-```python
-GRAMMAR = [
-    "forward", "backward", "turn left", "turn right",
-    "left", "right", "stop", "halt", "for", "second", "seconds",
-    "degree", "degrees", "one", "two", "three", "four", "five",
-    "six", "seven", "eight", "nine", "ten", "fifteen", "twenty",
-    "thirty", "forty", "forty five", "forty-five", "sixty",
-    "ninety", "one hundred", "one hundred eighty"
-]
-```
+By default, `vosk_local.py` uses `GRAMMAR_EXTENDED` for complete command recognition.
 
 ---
 
@@ -515,6 +561,69 @@ pip uninstall sounddevice
 pip install --no-cache-dir sounddevice
 ```
 
+#### Issue: ALSA Underrun/Overrun Warnings
+
+**Symptom**: Console flooded with `ALSA lib ... underrun occurred`
+
+**Cause**: Buffer size mismatch or system load
+
+**Solution**:
+```bash
+# Option 1: Suppress ALSA messages (not recommended for debugging)
+export PYTHONWARNINGS="ignore"
+
+# Option 2: Adjust buffer size in code
+# In vosk_local.py, try blocksize=4000 or blocksize=16000
+
+# Option 3: Increase process priority (requires sudo)
+sudo nice -n -10 python3 vosk_local.py
+```
+
+**Reference**: [ALSA Project Troubleshooting](https://www.alsa-project.org/wiki/Troubleshooting)
+
+#### Issue: Device Busy Error
+
+**Symptom**: `OSError: [Errno -9997] Invalid sample rate` or device busy
+
+**Cause**: Another process using the audio device
+
+**Solution**:
+```bash
+# Check processes using audio
+lsof /dev/snd/*
+
+# Kill competing processes
+sudo fuser -k /dev/snd/*
+
+# Restart ALSA
+sudo alsa force-reload
+```
+
+#### Issue: Permissions Denied (macOS)
+
+**Symptom**: Program runs but no audio captured
+
+**Cause**: Microphone permission not granted
+
+**Solution**:
+1. Go to **System Settings** → **Privacy & Security** → **Microphone**
+2. Enable permission for your terminal app (Terminal.app, iTerm2, etc.)
+3. Restart the terminal and re-run
+
+#### Issue: Poor Recognition Quality
+
+**Symptom**: Commands frequently misrecognized or not recognized
+
+**Solutions** (in order of effectiveness):
+1. **Check microphone positioning**: 6-12 inches from mouth, avoid obstacles
+2. **Test microphone quality**: `arecord -d 3 test.wav && aplay test.wav`
+3. **Reduce background noise**: Move away from fans, motors, HVAC
+4. **Enable grammar mode**: Much better accuracy for known commands
+5. **Try different model**: Download larger model for better accuracy
+6. **Check CPU load**: Recognition degrades under heavy system load
+
+**Reference**: [Vosk Accuracy FAQ](https://alphacephei.com/vosk/faq)
+
 ---
 
 ## Integration Example
@@ -530,12 +639,12 @@ def main():
         print("Listening for command...")
         task = recognize_once(timeout_s=3)
         
-        if task['task_name'] != 'stop' or task['confidence'] > 0.5:
+        if task['action'] != 'stop':
             print(f"Executing: {task}")
             # Send task to motor controller
             # execute_task(task)
         else:
-            print("Command not recognized, please repeat")
+            print("Stop command received or timeout")
 
 if __name__ == "__main__":
     main()
@@ -552,17 +661,95 @@ motor = MotorController()
 while True:
     task = recognize_once()
     
-    if task['task_name'] == 'forward':
-        duration = task['params']['duration_ms']
-        motor.move_forward(duration)
-    elif task['task_name'] == 'turn_left':
-        angle = task['params']['angle_deg']
-        motor.turn_left(angle)
-    elif task['task_name'] == 'stop':
+    action = task['action']
+    
+    if action == 'forward' or action == 'backward':
+        duration = task['duration_ms']
+        if action == 'forward':
+            motor.move_forward(duration)
+        else:
+            motor.move_backward(duration)
+    
+    elif action == 'left' or action == 'right':
+        angle = task['angle_deg']
+        if action == 'left':
+            motor.turn_left(angle)
+        else:
+            motor.turn_right(angle)
+    
+    elif action == 'stop':
         motor.stop()
 ```
 
 ---
+
+## Quality Assurance & Testing
+
+### Unit Tests
+
+The module includes comprehensive unit tests for `parse_en.py`:
+
+```bash
+cd local_processing
+python3 test_parse_en.py
+```
+
+**Test Coverage:**
+- 21 number parsing tests (ones, teens, tens, compositional)
+- 7 speed extraction tests
+- 16 command parsing tests (all action types with variations)
+- 5 edge case tests
+
+**Expected output:**
+```
+============================================================
+Parse English Module Test Suite
+============================================================
+...
+All tests PASSED!
+============================================================
+```
+
+### Performance Monitoring
+
+To measure recognition latency, you can add timing instrumentation:
+
+```python
+import time
+from vosk_local import recognize_once
+
+start = time.time()
+result = recognize_once(timeout_s=3)
+elapsed_ms = (time.time() - start) * 1000
+print(f"Recognition took {elapsed_ms:.1f}ms")
+print(result)
+```
+
+**Typical latencies on Raspberry Pi 4:**
+- Grammar mode: 200-400ms
+- No grammar: 300-600ms
+- Timeout (no speech): ~3000ms
+
+### Resource Cleanup
+
+The module properly handles cleanup on exit:
+
+- **KeyboardInterrupt (Ctrl+C)**: Gracefully stops audio stream and exits
+- **Exception handling**: Catches errors, prints diagnostics, cleans up resources
+- **Audio stream closure**: Automatically closed when exiting `with` block
+
+**Manual cleanup test:**
+```bash
+# Start recognition
+python3 vosk_local.py
+
+# Press Ctrl+C
+# Should see: "Shutting down gracefully..."
+# Should not leave audio device locked
+
+# Verify device available
+python3 -c "import sounddevice as sd; print(sd.query_devices())"
+```
 
 ## Verification Checklist
 
@@ -574,10 +761,14 @@ Use this checklist to verify successful installation:
 - [ ] Vosk model downloaded and extracted
 - [ ] Audio devices detected by `sounddevice`
 - [ ] Microphone test with `arecord` successful
-- [ ] `vosk_smoke.py` produces text output
-- [ ] `vosk_local.py` produces structured JSON
-- [ ] Command "forward five seconds" recognized correctly
-- [ ] Command "turn left ninety degrees" recognized correctly
+- [ ] `vosk_smoke.py` produces text output with device info
+- [ ] `vosk_local.py` produces structured JSON with all required fields
+- [ ] Command "forward five seconds" returns `{"action":"forward","duration_ms":5000,"angle_deg":null,"speed":null}`
+- [ ] Command "turn left ninety degrees" returns `{"action":"left","duration_ms":null,"angle_deg":90,"speed":null}`
+- [ ] Command "stop" returns `{"action":"stop","duration_ms":null,"angle_deg":null,"speed":null}`
+- [ ] JSON format matches cloud processing output
+- [ ] Unit tests (`test_parse_en.py`) pass with 100% success rate
+- [ ] Ctrl+C properly shuts down without leaving device locked
 - [ ] systemd service starts automatically (Raspberry Pi only)
 
 ---

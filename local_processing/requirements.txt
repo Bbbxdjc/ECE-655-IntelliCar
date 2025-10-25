@@ -1,0 +1,12 @@
+# Local Processing Dependencies for ECE-655-IntelliCar
+# Offline speech recognition using Vosk
+
+# Vosk speech recognition engine
+vosk>=0.3.45
+
+# Audio I/O library
+sounddevice>=0.4.6
+
+# Numerical computing (required by sounddevice and audio processing)
+numpy>=1.20.0,<2.0.0
+
