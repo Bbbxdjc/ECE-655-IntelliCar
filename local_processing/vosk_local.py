@@ -387,9 +387,9 @@ if __name__ == "__main__":
 
             # Provide clear feedback based on result
             if not args.debug:
-                if task['action'] == 'stop' and all(v is None for k, v in task.items() if k != 'action'):
-                    # All fields null + stop action = timeout/no speech
-                    print(f"[Timeout] No command recognized in {args.timeout}s")
+                if task['action'] is None:
+                    # All fields null = timeout/no valid recognition
+                    print(f"[Timeout/Unrecognized] No valid command in {args.timeout}s")
                 else:
                     print("[Recognized]")
 
@@ -398,6 +398,14 @@ if __name__ == "__main__":
             print("="*60)
             print(json.dumps(task, ensure_ascii=False, indent=2))
             print("="*60 + "\n")
+            
+            # In debug mode, wait for user to press Enter before next recognition
+            if args.debug:
+                try:
+                    input("🔄 按回车键开始下一次识别 (Ctrl+C 退出)... ")
+                    print()  # Add blank line for readability
+                except KeyboardInterrupt:
+                    raise  # Re-raise to be caught by outer handler
     except KeyboardInterrupt:
         print("\nShutting down gracefully...")
         sys.exit(0)

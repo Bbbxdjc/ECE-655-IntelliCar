@@ -1,270 +1,190 @@
-#!/usr/bin/env python3
 """
-Unit tests for parse_en.py
-Tests number parsing, unit parsing, speed extraction, and command parsing.
+Unit tests for simplified parse_en.py module.
+Tests only grammar-defined numbers and basic command parsing.
 """
 
-from parse_en import to_structured, _num, _extract_speed
+import unittest
+from parse_en import to_structured, _parse_number, MAX_DURATION_MS, MAX_ANGLE_DEG
 
 
-def test_number_parsing():
-    """Test _num function with various inputs."""
-    print("Testing number parsing...")
-    
-    test_cases = [
+class TestParseEn(unittest.TestCase):
+
+    def test_parse_number(self):
+        """Test number parsing with grammar-defined numbers only."""
         # Basic numbers
-        ("five", 5),
-        ("ten", 10),
-        ("fifteen", 15),
-        ("twenty", 20),
-        ("ninety", 90),
+        self.assertEqual(_parse_number("one"), 1)
+        self.assertEqual(_parse_number("five"), 5)
+        self.assertEqual(_parse_number("ten"), 10)
         
-        # Teens
-        ("eleven", 11),
-        ("twelve", 12),
-        ("thirteen", 13),
-        ("nineteen", 19),
-        
-        # Compositional (tens + ones)
-        ("twenty three", 23),
-        ("forty five", 45),
-        ("sixty seven", 67),
-        ("eighty nine", 89),
-        
-        # With hyphens
-        ("forty-five", 45),
-        ("twenty-one", 21),
+        # Common values
+        self.assertEqual(_parse_number("fifteen"), 15)
+        self.assertEqual(_parse_number("twenty"), 20)
+        self.assertEqual(_parse_number("thirty"), 30)
+        self.assertEqual(_parse_number("forty"), 40)
+        self.assertEqual(_parse_number("forty five"), 45)
+        self.assertEqual(_parse_number("forty-five"), 45)
+        self.assertEqual(_parse_number("sixty"), 60)
+        self.assertEqual(_parse_number("ninety"), 90)
+        self.assertEqual(_parse_number("one hundred"), 100)
+        self.assertEqual(_parse_number("one hundred eighty"), 180)
         
         # Digits
-        ("5", 5),
-        ("90", 90),
-        ("180", 180),
+        self.assertEqual(_parse_number("5"), 5)
+        self.assertEqual(_parse_number("90"), 90)
         
-        # Edge cases
-        ("zero", 0),
-        ("one hundred", 100),
-        ("one hundred eighty", 180),
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for input_text, expected in test_cases:
-        result = _num(input_text)
-        if result == expected:
-            passed += 1
-            print(f"  [PASS] '{input_text}' -> {result}")
-        else:
-            failed += 1
-            print(f"  [FAIL] '{input_text}' -> expected {expected}, got {result}")
-    
-    print(f"Number parsing: {passed} passed, {failed} failed\n")
-    return failed == 0
+        # Not in grammar (should return None)
+        self.assertIsNone(_parse_number("eleven"))
+        self.assertIsNone(_parse_number("twenty three"))
+        self.assertIsNone(_parse_number("hello"))
+
+    def test_forward_commands(self):
+        """Test forward movement commands."""
+        # Basic forward
+        result = to_structured("forward five seconds")
+        self.assertEqual(result["action"], "forward")
+        self.assertEqual(result["duration_ms"], 5000)
+        self.assertIsNone(result["angle_deg"])
+        self.assertIsNone(result["speed"])
+        
+        # Different durations
+        result = to_structured("forward ten seconds")
+        self.assertEqual(result["action"], "forward")
+        self.assertEqual(result["duration_ms"], 10000)
+        
+        result = to_structured("forward twenty seconds")
+        self.assertEqual(result["action"], "forward")
+        self.assertEqual(result["duration_ms"], 20000)
+        
+        # Without duration (no number matched)
+        result = to_structured("forward")
+        self.assertEqual(result["action"], "forward")
+        self.assertIsNone(result["duration_ms"])
+
+    def test_backward_commands(self):
+        """Test backward movement commands."""
+        result = to_structured("backward five seconds")
+        self.assertEqual(result["action"], "backward")
+        self.assertEqual(result["duration_ms"], 5000)
+        self.assertIsNone(result["angle_deg"])
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("backward thirty seconds")
+        self.assertEqual(result["action"], "backward")
+        self.assertEqual(result["duration_ms"], 30000)
+
+    def test_left_turn_commands(self):
+        """Test left turn commands."""
+        result = to_structured("turn left ninety degrees")
+        self.assertEqual(result["action"], "left")
+        self.assertEqual(result["angle_deg"], 90)
+        self.assertIsNone(result["duration_ms"])
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("left forty five degrees")
+        self.assertEqual(result["action"], "left")
+        self.assertEqual(result["angle_deg"], 45)
+        
+        result = to_structured("turn left one hundred eighty degrees")
+        self.assertEqual(result["action"], "left")
+        self.assertEqual(result["angle_deg"], 180)
+
+    def test_right_turn_commands(self):
+        """Test right turn commands."""
+        result = to_structured("turn right ninety degrees")
+        self.assertEqual(result["action"], "right")
+        self.assertEqual(result["angle_deg"], 90)
+        self.assertIsNone(result["duration_ms"])
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("right sixty degrees")
+        self.assertEqual(result["action"], "right")
+        self.assertEqual(result["angle_deg"], 60)
+
+    def test_stop_command(self):
+        """Test stop command."""
+        result = to_structured("stop")
+        self.assertEqual(result["action"], "stop")
+        self.assertIsNone(result["duration_ms"])
+        self.assertIsNone(result["angle_deg"])
+        self.assertIsNone(result["speed"])
+
+    def test_boundary_limits(self):
+        """Test duration and angle boundary enforcement."""
+        # Max duration (30 seconds = 30000ms)
+        result = to_structured("forward one hundred seconds")
+        self.assertEqual(result["action"], "forward")
+        self.assertEqual(result["duration_ms"], MAX_DURATION_MS)  # capped at 30000
+        
+        # Angle bounds (1-360)
+        # Note: our grammar doesn't have numbers > 360, so this is theoretical
+        # but the code has the safety check
+
+    def test_unrecognized_commands(self):
+        """Test handling of unrecognized commands."""
+        result = to_structured("hello world")
+        self.assertIsNone(result["action"])
+        self.assertIsNone(result["duration_ms"])
+        self.assertIsNone(result["angle_deg"])
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("jump")
+        self.assertIsNone(result["action"])
+
+    def test_speed_always_null(self):
+        """Test that speed is always null (not used)."""
+        # Speed is removed from the system
+        result = to_structured("forward five seconds")
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("turn left ninety degrees")
+        self.assertIsNone(result["speed"])
+        
+        result = to_structured("stop")
+        self.assertIsNone(result["speed"])
+
+    def test_case_insensitivity(self):
+        """Test case-insensitive parsing."""
+        result1 = to_structured("FORWARD FIVE SECONDS")
+        result2 = to_structured("forward five seconds")
+        self.assertEqual(result1, result2)
+        
+        result1 = to_structured("Turn Left Ninety Degrees")
+        result2 = to_structured("turn left ninety degrees")
+        self.assertEqual(result1, result2)
+
+    def test_whitespace_handling(self):
+        """Test normalization of extra whitespace."""
+        result1 = to_structured("forward   five    seconds")
+        result2 = to_structured("forward five seconds")
+        self.assertEqual(result1, result2)
 
 
-def test_speed_extraction():
-    """Test _extract_speed function."""
-    print("Testing speed extraction...")
-    
-    test_cases = [
-        ("forward five seconds speed L2", "L2"),
-        ("go forward at speed L1", "L1"),
-        ("turn left level 3", "L3"),
-        ("backward speed L0", "L0"),
-        ("forward level 2", "L2"),
-        ("stop", None),
-        ("forward five seconds", None),
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for input_text, expected in test_cases:
-        result = _extract_speed(input_text)
-        if result == expected:
-            passed += 1
-            print(f"  [PASS] '{input_text}' -> {result}")
-        else:
-            failed += 1
-            print(f"  [FAIL] '{input_text}' -> expected {expected}, got {result}")
-    
-    print(f"Speed extraction: {passed} passed, {failed} failed\n")
-    return failed == 0
-
-
-def test_command_parsing():
-    """Test to_structured function with various commands."""
-    print("Testing command parsing...")
-    
-    test_cases = [
-        # Forward/backward with various units
-        {
-            "input": "forward five seconds",
-            "expected": {"action": "forward", "duration_ms": 5000, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "backward ten secs",
-            "expected": {"action": "backward", "duration_ms": 10000, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "go forward for three seconds",
-            "expected": {"action": "forward", "duration_ms": 3000, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "move backward twenty seconds",
-            "expected": {"action": "backward", "duration_ms": 20000, "angle_deg": None, "speed": None}
-        },
-        
-        # Turns with various units
-        {
-            "input": "turn left ninety degrees",
-            "expected": {"action": "left", "duration_ms": None, "angle_deg": 90, "speed": None}
-        },
-        {
-            "input": "right forty five deg",
-            "expected": {"action": "right", "duration_ms": None, "angle_deg": 45, "speed": None}
-        },
-        {
-            "input": "left one hundred eighty degrees",
-            "expected": {"action": "left", "duration_ms": None, "angle_deg": 180, "speed": None}
-        },
-        
-        # With speed
-        {
-            "input": "forward five seconds speed L2",
-            "expected": {"action": "forward", "duration_ms": 5000, "angle_deg": None, "speed": "L2"}
-        },
-        {
-            "input": "turn right ninety degrees level 3",
-            "expected": {"action": "right", "duration_ms": None, "angle_deg": 90, "speed": "L3"}
-        },
-        
-        # Compositional numbers
-        {
-            "input": "forward twenty three seconds",
-            "expected": {"action": "forward", "duration_ms": 23000, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "left sixty seven degrees",
-            "expected": {"action": "left", "duration_ms": None, "angle_deg": 67, "speed": None}
-        },
-        
-        # Defaults
-        {
-            "input": "forward",
-            "expected": {"action": "forward", "duration_ms": 2000, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "left",
-            "expected": {"action": "left", "duration_ms": None, "angle_deg": 90, "speed": None}
-        },
-        
-        # Stop
-        {
-            "input": "stop",
-            "expected": {"action": "stop", "duration_ms": None, "angle_deg": None, "speed": None}
-        },
-        {
-            "input": "halt",
-            "expected": {"action": "stop", "duration_ms": None, "angle_deg": None, "speed": None}
-        },
-        
-        # Boundary cases
-        {
-            "input": "forward fifty seconds",
-            "expected": {"action": "forward", "duration_ms": 30000, "angle_deg": None, "speed": None}  # Capped at MAX
-        },
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test in test_cases:
-        result = to_structured(test["input"])
-        expected = test["expected"]
-        
-        if result == expected:
-            passed += 1
-            print(f"  [PASS] '{test['input']}'")
-        else:
-            failed += 1
-            print(f"  [FAIL] '{test['input']}'")
-            print(f"        Expected: {expected}")
-            print(f"        Got:      {result}")
-    
-    print(f"Command parsing: {passed} passed, {failed} failed\n")
-    return failed == 0
-
-
-def test_edge_cases():
-    """Test edge cases and boundary conditions."""
-    print("Testing edge cases...")
-    
-    test_cases = [
-        # Missing units (implicit seconds)
-        ("forward five", 5000),  # Implicitly "five seconds"
-        ("right thirty", 30),    # Implicitly "thirty degrees"
-        
-        # Unrecognized command
-        ("unknown command", "stop"),
-        
-        # Mixed case
-        ("FORWARD FIVE SECONDS", 5000),
-        ("TuRn LeFt NiNeTy DeGrEeS", 90),
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for input_text, expected_value in test_cases:
-        result = to_structured(input_text)
-        
-        if isinstance(expected_value, int):
-            # Check duration or angle
-            actual = result.get("duration_ms") or result.get("angle_deg")
-            if actual == expected_value:
-                passed += 1
-                print(f"  [PASS] '{input_text}'")
-            else:
-                failed += 1
-                print(f"  [FAIL] '{input_text}' -> expected {expected_value}, got {actual}")
-        else:
-            # Check action
-            if result["action"] == expected_value:
-                passed += 1
-                print(f"  [PASS] '{input_text}'")
-            else:
-                failed += 1
-                print(f"  [FAIL] '{input_text}' -> expected action '{expected_value}', got '{result['action']}'")
-    
-    print(f"Edge cases: {passed} passed, {failed} failed\n")
-    return failed == 0
-
-
-def main():
-    """Run all tests."""
+def run_tests():
+    """Run all tests with formatted output."""
     print("="*60)
-    print("Parse English Module Test Suite")
+    print("Parse English Module Test Suite (Simplified)")
     print("="*60)
-    print()
     
-    all_passed = True
-    all_passed &= test_number_parsing()
-    all_passed &= test_speed_extraction()
-    all_passed &= test_command_parsing()
-    all_passed &= test_edge_cases()
+    # Create test suite
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestParseEn)
     
-    print("="*60)
-    if all_passed:
-        print("All tests PASSED!")
-        print("="*60)
-        return 0
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    # Summary
+    print("\n" + "="*60)
+    if result.wasSuccessful():
+        print("✅ All tests PASSED!")
     else:
-        print("Some tests FAILED. Review output above.")
-        print("="*60)
-        return 1
+        print(f"❌ {len(result.failures)} test(s) FAILED")
+        print(f"❌ {len(result.errors)} test(s) ERROR")
+    print("="*60)
+    
+    return result.wasSuccessful()
 
 
-if __name__ == "__main__":
-    exit(main())
-
+if __name__ == '__main__':
+    success = run_tests()
+    exit(0 if success else 1)
