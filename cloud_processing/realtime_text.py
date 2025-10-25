@@ -1,16 +1,21 @@
 # realtime_text.py
-import os, sys, json, shutil, wave, tempfile, subprocess, argparse
+import os, sys, json, shutil, wave, tempfile, subprocess, argparse, time
 import numpy as np
 from typing import Dict, Any
 from faster_whisper import WhisperModel
 from openai import OpenAI
+from contextlib import contextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ================== 配置 ==================
-ENDPOINT      = "https://models.github.ai/inference"
-MODEL_NAME    = "openai/gpt-4o-mini"
+ENDPOINT      = os.environ.get("OPENAI_BASE_URL", "https://models.github.ai/inference")
+MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
+API_KEY       = os.environ.get("GITHUB_TOKEN", "")
 
 # Whisper 配置
-WHISPER_MODEL = "base"       # "tiny"/"base"/"small"/"medium"
+WHISPER_MODEL = "tiny"       # "tiny"/"base"/"small"/"medium"
 WHISPER_DEV   = "cpu"
 WHISPER_CT    = "int8"
 LANG_HINT     = None         # 设为 "zh" 可固定中文；None 自动检测
@@ -54,9 +59,21 @@ SYSTEM_PROMPT = (
     "Do not include any other keys."
 )
 
+# ============== 轻量级性能计时 ==============
+_TIMINGS = []  # [{"step": str, "ms": float}]
+
+@contextmanager
+def timed(step: str):
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        _TIMINGS.append({"step": step, "ms": round(dt_ms, 2)})
+
 # ============== 工具函数（无兜底） ==============
 def ensure_token() -> str:
-    tok = "GITHUB_TOKEN"
+    tok = API_KEY
     if not tok:
         print("❌ Env GITHUB_TOKEN missing.", file=sys.stderr)
         sys.exit(2)
@@ -74,16 +91,18 @@ def m4a_to_wav16_mono(path: str) -> str:
     fd, wav_path = tempfile.mkstemp(suffix=".wav"); os.close(fd)
     cmd = ["ffmpeg","-y","-i",path,"-ac","1","-ar","16000","-vn","-acodec","pcm_s16le",wav_path]
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        with timed("m4a→wav (ffmpeg)"):
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     except subprocess.CalledProcessError as e:
         print("❌ ffmpeg failed:", e.stderr.decode(errors="ignore"), file=sys.stderr)
         sys.exit(5)
     return wav_path
 
 def read_wav_float32(wav_path: str) -> np.ndarray:
-    with wave.open(wav_path,"rb") as wf:
-        raw = wf.readframes(wf.getnframes())
-        pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)/32768.0
+    with timed("read_wav"):
+        with wave.open(wav_path,"rb") as wf:
+            raw = wf.readframes(wf.getnframes())
+            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)/32768.0
     return pcm
 
 def stt_from_file(audio_path: str) -> str:
@@ -98,8 +117,10 @@ def stt_from_file(audio_path: str) -> str:
         print("❌ Only .m4a or .wav supported.", file=sys.stderr); sys.exit(6)
 
     pcm = read_wav_float32(path)
-    model = WhisperModel(WHISPER_MODEL, device=WHISPER_DEV, compute_type=WHISPER_CT)
-    segs, _ = model.transcribe(pcm, language=LANG_HINT)
+    with timed("whisper_model_load"):
+        model = WhisperModel(WHISPER_MODEL, device=WHISPER_DEV, compute_type=WHISPER_CT)
+    with timed("whisper_transcribe"):
+        segs, _ = model.transcribe(pcm, language=LANG_HINT)
     text = "".join(s.text for s in segs).strip()
     if cleanup:
         try: os.remove(cleanup)
@@ -114,13 +135,14 @@ def stt_from_file(audio_path: str) -> str:
 # ============== 模型调用（单次 json_schema） ==============
 def call_model_strict(client: OpenAI, user_text: str) -> Dict[str, Any]:
     try:
-        resp = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role":"system","content":SYSTEM_PROMPT},
-                      {"role":"user","content":user_text}],
-            temperature=0,
-            response_format={"type":"json_schema","json_schema":CAR_CMD_SCHEMA},
-        )
+        with timed("model_call"):
+            resp = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role":"system","content":SYSTEM_PROMPT},
+                          {"role":"user","content":user_text}],
+                temperature=0,
+                response_format={"type":"json_schema","json_schema":CAR_CMD_SCHEMA},
+            )
     except Exception as e:
         print(f"❌ Model call failed: {e}", file=sys.stderr)
         sys.exit(9)
@@ -190,10 +212,13 @@ def validate_payload(data: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== 高层入口（无兜底） ==============
 def run_from_text(user_text: str) -> Dict[str,Any]:
-    token = ensure_token()
-    client = OpenAI(base_url=ENDPOINT, api_key=token)
+    with timed("init_openai_client"):
+        token = ensure_token()
+        client = OpenAI(base_url=ENDPOINT, api_key=token)
     raw = call_model_strict(client, user_text)
-    return validate_payload(raw)
+    with timed("validation"):
+        validated = validate_payload(raw)
+    return validated
 
 def run_from_audio(audio_path: str) -> Dict[str,Any]:
     user_text = stt_from_file(audio_path)
@@ -216,6 +241,12 @@ def main():
         data = run_from_audio(args.input)
 
     print(json.dumps(data, ensure_ascii=False, separators=(",",":")))
+    # 输出计时信息到 stderr，避免污染 JSON 输出
+    if _TIMINGS:
+        print("\n步骤计时:", file=sys.stderr)
+        for idx, rec in enumerate(_TIMINGS, 1):
+            print(f"{idx}. {rec['step']}: {rec['ms']} ms", file=sys.stderr)
+        print(f"共 {len(_TIMINGS)} 步", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

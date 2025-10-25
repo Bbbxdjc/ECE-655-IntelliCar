@@ -19,7 +19,7 @@ MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
 API_KEY       = os.environ.get("GITHUB_TOKEN", "")
 
 # Whisper
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
 WHISPER_DEV   = os.environ.get("WHISPER_DEV", "cpu")
 WHISPER_CT    = os.environ.get("WHISPER_CT", "int8")
 LANG_HINT     = None  # "zh" 可固定中文
