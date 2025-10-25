@@ -6,14 +6,14 @@ Shared grammar lists and constants.
 # Minimal grammar for basic commands
 GRAMMAR_MINIMAL = [
     "forward", "backward", "turn left", "turn right",
-    "left", "right", "stop", "halt"
+    "left", "right", "stop"
 ]
 
 # Extended grammar including numbers and units for full command recognition
 GRAMMAR_EXTENDED = [
     # Actions
     "forward", "backward", "turn left", "turn right",
-    "left", "right", "stop", "halt",
+    "left", "right", "stop",
     # Prepositions and units
     "for", "second", "seconds", "degree", "degrees",
     # Numbers (0-10 and common values)

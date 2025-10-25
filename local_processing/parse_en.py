@@ -26,8 +26,7 @@ WORDS2NUM = {
 # Configuration constants
 MAX_DURATION = 30000  # milliseconds
 MIN_DURATION = 0      # milliseconds
-DEFAULT_DURATION = 2000  # milliseconds (2 seconds)
-DEFAULT_ANGLE = 90       # degrees
+# No default values - return None if not recognized
 
 
 def _num(tok):
@@ -105,9 +104,13 @@ def _extract_speed(text: str):
     return None
 
 
-def to_structured(text: str):
+def to_structured(text: str, debug=False):
     """
     Parse English command text into structured JSON format.
+    
+    Args:
+        text: Input text from speech recognition
+        debug: If True, print detailed parsing steps
     
     Returns format compatible with cloud processing:
     {
@@ -117,22 +120,35 @@ def to_structured(text: str):
         "speed": str|null
     }
     """
+    if debug:
+        print(f"  ├─ 输入文本: '{text}'")
+    
     t = " ".join(text.lower().split())
+    
+    if debug:
+        print(f"  ├─ 规范化后: '{t}'")
     
     # Extract speed first (applies to all movement commands)
     speed = _extract_speed(t)
     
-    # Default: stop command
+    if debug:
+        print(f"  ├─ 提取速度: {speed if speed else '无'}")
+    
+    # Default: unrecognized (null)
     out = {
-        "action": "stop",
+        "action": None,
         "duration_ms": None,
         "angle_deg": None,
-        "speed": speed
+        "speed": None
     }
     
     # Check for stop command
-    if any(k in t for k in ["stop", "halt"]):
+    if "stop" in t:
+        out["action"] = "stop"
         out["speed"] = None  # Stop command doesn't have speed
+        if debug:
+            print(f"  ├─ 识别为停止命令")
+            print(f"  └─ 输出: {out}")
         return out
     
     # Check for forward/backward (support synonyms: go/move forward)
@@ -141,54 +157,134 @@ def to_structured(text: str):
     
     if has_forward or has_backward:
         out["action"] = "forward" if has_forward else "backward"
+        
+        if debug:
+            print(f"  ├─ 识别为: {'前进' if has_forward else '后退'}命令")
+        
         # Match number before time units, capture multi-word numbers greedily
         # Stop at time unit or speed/level keywords
         m = re.search(r"(?:(?:go|move)\s+)?(?:forward|backward)(?:\s+for)?\s+(.+?)(?:\s+(?:seconds?|secs?|s)|(?:\s+(?:at\s+)?(?:speed|level))|$)", t)
         if m:
             num_text = m.group(1).strip()
+            if debug:
+                print(f"  ├─ 正则匹配到数字部分: '{num_text}'")
             dur = _num(num_text)
+            if debug:
+                print(f"  ├─ 数字解析结果: {dur}")
+            
+            if dur is not None:
+                # Only set if we successfully parsed a number
+                duration = int(dur * 1000)
+                # Enforce duration bounds
+                out["duration_ms"] = max(MIN_DURATION, min(duration, MAX_DURATION))
+                
+                if debug:
+                    if duration != out["duration_ms"]:
+                        print(f"  ├─ 时长裁剪: {duration}ms → {out['duration_ms']}ms (边界约束)")
+                    else:
+                        print(f"  ├─ 最终时长: {out['duration_ms']}ms")
+            else:
+                if debug:
+                    print(f"  ├─ 数字解析失败，时长保持None")
         else:
-            dur = None
-        duration = int((dur if dur is not None else (DEFAULT_DURATION / 1000)) * 1000)
-        # Enforce duration bounds
-        out["duration_ms"] = max(MIN_DURATION, min(duration, MAX_DURATION))
+            if debug:
+                print(f"  ├─ 未匹配到数字部分，时长保持None")
+        
         out["angle_deg"] = None
         out["speed"] = speed  # Apply extracted speed
+        
+        if debug:
+            print(f"  └─ 输出: {out}")
+        
         return out
     
     # Check for left turn
     if "left" in t:
         out["action"] = "left"
+        
+        if debug:
+            print(f"  ├─ 识别为: 左转命令")
+        
         # Match number before angle units, capture multi-word numbers greedily
         m = re.search(r"(?:left|turn\s+left)\s+(.+?)(?:\s+(?:degrees?|deg)|(?:\s+(?:at\s+)?(?:speed|level))|$)", t)
         if m:
             num_text = m.group(1).strip()
+            if debug:
+                print(f"  ├─ 正则匹配到数字部分: '{num_text}'")
             ang = _num(num_text)
+            if debug:
+                print(f"  ├─ 数字解析结果: {ang}")
+            
+            if ang is not None:
+                # Only set if we successfully parsed a number
+                # Enforce angle bounds (1-360)
+                out["angle_deg"] = max(1, min(int(ang), 360))
+                
+                if debug:
+                    if int(ang) != out["angle_deg"]:
+                        print(f"  ├─ 角度裁剪: {int(ang)}° → {out['angle_deg']}° (边界约束)")
+                    else:
+                        print(f"  ├─ 最终角度: {out['angle_deg']}°")
+            else:
+                if debug:
+                    print(f"  ├─ 数字解析失败，角度保持None")
         else:
-            ang = None
-        angle = ang if ang is not None else DEFAULT_ANGLE
-        # Enforce angle bounds (1-360)
-        out["angle_deg"] = max(1, min(int(angle), 360))
+            if debug:
+                print(f"  ├─ 未匹配到数字部分，角度保持None")
+        
         out["duration_ms"] = None
         out["speed"] = speed  # Apply extracted speed
+        
+        if debug:
+            print(f"  └─ 输出: {out}")
+        
         return out
     
     # Check for right turn
     if "right" in t:
         out["action"] = "right"
+        
+        if debug:
+            print(f"  ├─ 识别为: 右转命令")
+        
         # Match number before angle units, capture multi-word numbers greedily
         m = re.search(r"(?:right|turn\s+right)\s+(.+?)(?:\s+(?:degrees?|deg)|(?:\s+(?:at\s+)?(?:speed|level))|$)", t)
         if m:
             num_text = m.group(1).strip()
+            if debug:
+                print(f"  ├─ 正则匹配到数字部分: '{num_text}'")
             ang = _num(num_text)
+            if debug:
+                print(f"  ├─ 数字解析结果: {ang}")
+            
+            if ang is not None:
+                # Only set if we successfully parsed a number
+                # Enforce angle bounds (1-360)
+                out["angle_deg"] = max(1, min(int(ang), 360))
+                
+                if debug:
+                    if int(ang) != out["angle_deg"]:
+                        print(f"  ├─ 角度裁剪: {int(ang)}° → {out['angle_deg']}° (边界约束)")
+                    else:
+                        print(f"  ├─ 最终角度: {out['angle_deg']}°")
+            else:
+                if debug:
+                    print(f"  ├─ 数字解析失败，角度保持None")
         else:
-            ang = None
-        angle = ang if ang is not None else DEFAULT_ANGLE
-        # Enforce angle bounds (1-360)
-        out["angle_deg"] = max(1, min(int(angle), 360))
+            if debug:
+                print(f"  ├─ 未匹配到数字部分，角度保持None")
+        
         out["duration_ms"] = None
         out["speed"] = speed  # Apply extracted speed
+        
+        if debug:
+            print(f"  └─ 输出: {out}")
+        
         return out
+
+    # Unrecognized command, return null
+    if debug:
+        print(f"  ├─ 未识别的命令，返回null")
+        print(f"  └─ 输出: {out}")
     
-    # Unrecognized command, return stop
     return out
