@@ -12,7 +12,7 @@ load_dotenv()
 # ================== 配置 ==================
 ENDPOINT      = os.environ.get("OPENAI_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
-API_KEY       = os.environ.get("GITHUB_TOKEN", "")
+API_KEY       = os.environ.get("OPENAI_API_KEY", "")
 
 # Whisper 配置
 WHISPER_MODEL = "tiny"       # "tiny"/"base"/"small"/"medium"
