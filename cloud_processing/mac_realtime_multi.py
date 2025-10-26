@@ -36,8 +36,9 @@ PRINT_STT_DEFAULT = True
 # 纯 Python RMS VAD
 RMS_WIN_MS        = 200
 RMS_THRESH_DB     = -35.0
-RMS_HANG_MS_ON    = 120
-RMS_HANG_MS_OFF   = 450
+RMS_HANG_MS_ON    = 120     # 连续多久的语音才触发"开始"
+RMS_HANG_MS_OFF   = 450     # 连续多久的静音才触发"结束"
+RMS_LOOKBACK_MS   = 300     # 回溯窗口：检测到语音后往前看多久
 RMS_FLOOR_DECAY   = 0.995
 
 # 业务约束
@@ -211,8 +212,9 @@ def audio_producer(device_idx, print_stt=False):
 
     ring_sil = deque(maxlen=RMS_HANG_MS_OFF // FRAME_MS)
     ring_vox = deque(maxlen=RMS_HANG_MS_ON // FRAME_MS)
-    # 保留最近的音频帧，用于回溯收集
-    recent_frames = deque(maxlen=RMS_HANG_MS_ON // FRAME_MS)
+    # 保留最近的音频帧，用于回溯收集（使用独立的回溯窗口）
+    # RMS_LOOKBACK_MS (300ms) 可以捕获语音真正的开头，避免丢失第一个音节
+    recent_frames = deque(maxlen=RMS_LOOKBACK_MS // FRAME_MS)
     in_speech = False
     seg_frames = []
     seg_start_t = None
@@ -302,6 +304,8 @@ def consumer_worker(print_stt=False):
         except queue.Empty:
             continue
 
+        # 开始计时：STT
+        stt_start = time.time()
         try:
             with whisper_lock:
                 if model is None:
@@ -312,23 +316,37 @@ def consumer_worker(print_stt=False):
             print(f"❌ STT failed (segment #{seg_id}): {e}", file=sys.stderr)
             segments_q.task_done()
             continue
+        stt_time = time.time() - stt_start
 
         if print_stt or PRINT_STT_DEFAULT:
             print(f"👤 STT (segment #{seg_id}): {text or '(empty)'}")
 
         if not text:
+            # 只有 STT 时间
+            print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s")
             segments_q.task_done()
             continue
 
+        # 开始计时：LLM
+        llm_start = time.time()
         try:
             data = call_model_strict_multi(client, text)
+            llm_time = time.time() - llm_start
+            
+            # 打印时间统计
+            print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s, LLM={llm_time:.3f}s, Total={stt_time + llm_time:.3f}s")
+            
             # 逐条输出（每条一行 JSON，包含 id）
             for cmd in data["commands"]:
                 cmd["id"] = seg_id
                 print(json.dumps(cmd, ensure_ascii=False, separators=(",",":")))
         except SystemExit as e:
+            llm_time = time.time() - llm_start
+            print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s, LLM={llm_time:.3f}s, Total={stt_time + llm_time:.3f}s")
             print(f"❌ Command validation failed (segment #{seg_id}): {e}", file=sys.stderr)
         except Exception as e:
+            llm_time = time.time() - llm_start
+            print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s, LLM={llm_time:.3f}s, Total={stt_time + llm_time:.3f}s")
             print(f"❌ Command pipeline error (segment #{seg_id}): {e}", file=sys.stderr)
         finally:
             segments_q.task_done()

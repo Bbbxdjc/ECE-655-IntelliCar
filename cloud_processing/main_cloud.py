@@ -11,6 +11,7 @@ import signal
 import argparse
 import threading
 import queue
+import time
 
 from vad_module import AudioVAD, VADConfig
 from stt_module import SpeechToText, STTConfig
@@ -20,13 +21,14 @@ from llm_module import CommandParser, LLMConfig
 class RealtimeCommandSystem:
     """实时命令系统"""
     
-    def __init__(self, device_idx=None, print_stt=True):
+    def __init__(self, device_idx=None, print_stt=True, use_llm=True):
         # 初始化三个模块
         self.vad = AudioVAD(VADConfig(), device_idx=device_idx)
         self.stt = SpeechToText(STTConfig())
-        self.llm = CommandParser(LLMConfig())
+        self.llm = CommandParser(LLMConfig()) if use_llm else None
         
         self.print_stt = print_stt
+        self.use_llm = use_llm
         self.segments_queue = queue.Queue()
         self.stop_event = threading.Event()
     
@@ -44,22 +46,32 @@ class RealtimeCommandSystem:
             
             try:
                 # 步骤 1: STT 语音识别
+                stt_start = time.time()
                 text = self.stt.transcribe(audio_data)
+                stt_time = time.time() - stt_start
                 
                 if self.print_stt:
                     print(f"👤 STT (segment #{seg_id}): {text or '(empty)'}")
                 
                 if not text:
-                    self.segments_queue.task_done()
                     continue
                 
-                # 步骤 2: LLM 解析命令
-                commands = self.llm.parse(text)
-                
-                # 步骤 3: 输出命令（添加 segment id）
-                for cmd in commands:
-                    cmd["id"] = seg_id
-                    print(json.dumps(cmd, ensure_ascii=False, separators=(",", ":")))
+                # 步骤 2: LLM 解析命令（可选）
+                if self.use_llm:
+                    llm_start = time.time()
+                    commands = self.llm.parse(text)
+                    llm_time = time.time() - llm_start
+                    
+                    # 打印时间统计
+                    print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s, LLM={llm_time:.3f}s, Total={stt_time + llm_time:.3f}s")
+                    
+                    # 步骤 3: 输出命令（添加 segment id）
+                    for cmd in commands:
+                        cmd["id"] = seg_id
+                        print(json.dumps(cmd, ensure_ascii=False, separators=(",", ":")))
+                else:
+                    # 不使用 LLM，只打印 STT 时间
+                    print(f"⏱️  Timing (segment #{seg_id}): STT={stt_time:.3f}s")
                 
             except Exception as e:
                 print(f"❌ Processing failed (segment #{seg_id}): {e}", file=sys.stderr)
@@ -72,7 +84,10 @@ class RealtimeCommandSystem:
         print("🎙️  macOS real-time command mode (modular version)")
         print(f"   - VAD: RMS-based endpoint detection")
         print(f"   - STT: Faster-Whisper")
-        print(f"   - LLM: Structured command parsing")
+        if self.use_llm:
+            print(f"   - LLM: Structured command parsing")
+        else:
+            print(f"   - LLM: Disabled (STT only mode)")
         print("Press Ctrl+C to stop.\n")
         
         # 启动消费者线程
@@ -105,6 +120,7 @@ def main():
     parser = argparse.ArgumentParser(description="macOS realtime voice → modular command system")
     parser.add_argument("--device", type=int, default=None, help="sounddevice input device index")
     parser.add_argument("--print-stt", action="store_true", help="print STT text")
+    parser.add_argument("--no-llm", action="store_true", help="disable LLM, STT only mode")
     args = parser.parse_args()
     
     if args.device is None:
@@ -112,7 +128,11 @@ def main():
               "to find your mic index.", file=sys.stderr)
     
     try:
-        system = RealtimeCommandSystem(device_idx=args.device, print_stt=args.print_stt)
+        system = RealtimeCommandSystem(
+            device_idx=args.device, 
+            print_stt=args.print_stt, 
+            use_llm=not args.no_llm
+        )
         system.start()
     except Exception as e:
         print(f"❌ System error: {e}", file=sys.stderr)

@@ -25,8 +25,9 @@ class VADConfig:
         # RMS VAD 参数
         self.rms_win_ms = 200
         self.rms_thresh_db = -35.0
-        self.rms_hang_ms_on = 120
-        self.rms_hang_ms_off = 450
+        self.rms_hang_ms_on = 120      # 连续多久的语音才触发"开始"
+        self.rms_hang_ms_off = 450     # 连续多久的静音才触发"结束"
+        self.rms_lookback_ms = 500     # 回溯窗口：检测到语音后往前看多久
         self.rms_floor_decay = 0.995
 
 
@@ -81,7 +82,8 @@ class AudioVAD:
         # VAD 状态
         ring_sil = deque(maxlen=self.config.rms_hang_ms_off // self.config.frame_ms)
         ring_vox = deque(maxlen=self.config.rms_hang_ms_on // self.config.frame_ms)
-        recent_frames = deque(maxlen=self.config.rms_hang_ms_on // self.config.frame_ms)
+        # 使用独立的回溯窗口，避免丢失语音开头
+        recent_frames = deque(maxlen=self.config.rms_lookback_ms // self.config.frame_ms)
         
         in_speech = False
         seg_frames = []
