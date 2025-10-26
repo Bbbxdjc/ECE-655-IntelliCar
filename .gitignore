@@ -13,3 +13,6 @@ __pycache__/
 # Audio artifacts (optional)
 *.wav
 *.m4a
+
+# Archives
+*archive/
