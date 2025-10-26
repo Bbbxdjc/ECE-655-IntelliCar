@@ -11,14 +11,12 @@ from faster_whisper import WhisperModel
 from openai import OpenAI
 from dotenv import load_dotenv
 
-KEYTYPE = "OPENAI_API_KEY"  # change to "GITHUB_TOKEN" if you are using GitHub Models
-
 load_dotenv()
 
 # ================== 配置 ==================
 ENDPOINT      = os.environ.get("OPENAI_BASE_URL", "https://models.github.ai/inference")
 MODEL_NAME    = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
-API_KEY       = os.environ.get(KEYTYPE, "")
+API_KEY       = os.environ.get("OPENAI_API_KEY", "")
 
 # Whisper
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")  # change to "base" if you want to use the larger model
