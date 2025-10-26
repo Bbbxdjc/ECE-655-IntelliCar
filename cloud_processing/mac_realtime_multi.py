@@ -38,8 +38,6 @@ RMS_HANG_MS_ON    = 120     # 连续多久的语音才触发"开始"
 RMS_HANG_MS_OFF   = 450     # 连续多久的静音才触发"结束"
 RMS_LOOKBACK_MS   = 500     # 回溯窗口：检测到语音后往前看多久
 RMS_FLOOR_DECAY   = 0.995
-RMS_ENERGY_HISTORY = 10     # 能量平滑：使用最近 N 帧的平均值
-RMS_ENERGY_MARGIN = 20.0    # 动态阈值裕度：噪声底 + 裕度 (dB)
 
 # 业务约束
 ACTIONS      = {"forward","backward","left","right","stop"}
@@ -213,10 +211,8 @@ def audio_producer(device_idx, print_stt=False):
     ring_sil = deque(maxlen=RMS_HANG_MS_OFF // FRAME_MS)
     ring_vox = deque(maxlen=RMS_HANG_MS_ON // FRAME_MS)
     # 保留最近的音频帧，用于回溯收集（使用独立的回溯窗口）
-    # RMS_LOOKBACK_MS (500ms) 可以捕获语音真正的开头，避免丢失第一个音节
+    # RMS_LOOKBACK_MS (300ms) 可以捕获语音真正的开头，避免丢失第一个音节
     recent_frames = deque(maxlen=RMS_LOOKBACK_MS // FRAME_MS)
-    # 能量历史记录（用于平滑）
-    energy_history = deque(maxlen=RMS_ENERGY_HISTORY)
     in_speech = False
     seg_frames = []
     seg_start_t = None
@@ -227,7 +223,7 @@ def audio_producer(device_idx, print_stt=False):
         return 20.0 * np.log10(rms + 1e-8)
 
     def on_audio(indata, frames, time_info, status):
-        nonlocal in_speech, seg_frames, seg_start_t, noise_floor_db, energy_history
+        nonlocal in_speech, seg_frames, seg_start_t, noise_floor_db
         if stop_event.is_set():
             raise sd.CallbackStop()
 
@@ -239,23 +235,11 @@ def audio_producer(device_idx, print_stt=False):
             idx += FRAME_SAMPLES
 
             db = pcm_float_to_db(frame)
-            
-            # 添加到能量历史
-            energy_history.append(db)
-            
-            # 动态噪声底更新（仅在静音期间）
             if not in_speech:
                 noise_floor_db = max(-80.0, min(-5.0, RMS_FLOOR_DECAY*noise_floor_db + (1.0-RMS_FLOOR_DECAY)*db))
 
-            # 使用更强的动态阈值（增加裕度）
-            dynamic_thresh = max(noise_floor_db + RMS_ENERGY_MARGIN, RMS_THRESH_DB)
-            
-            # 使用平均能量判断（而不是单帧）
-            if len(energy_history) == energy_history.maxlen:
-                avg_energy = sum(energy_history) / len(energy_history)
-                is_voiced = avg_energy >= dynamic_thresh
-            else:
-                is_voiced = db >= dynamic_thresh  # 启动阶段回退到单帧判断
+            dynamic_thresh = max(noise_floor_db + 10.0, RMS_THRESH_DB)
+            is_voiced = db >= dynamic_thresh
 
             ring_vox.append(is_voiced)
             ring_sil.append(not is_voiced)

@@ -18,7 +18,7 @@ API_KEY       = os.environ.get("OPENAI_API_KEY", "")
 WHISPER_MODEL = "tiny"       # "tiny"/"base"/"small"/"medium"
 WHISPER_DEV   = "cpu"
 WHISPER_CT    = "int8"
-LANG_HINT     = None         # 设为 "zh" 可固定中文；None 自动检测
+LANG_HINT     = "en"         # 设为 "zh" 可固定中文；None 自动检测
 
 # 业务约束
 ACTIONS       = {"forward","backward","left","right","stop"}
