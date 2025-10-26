@@ -27,7 +27,8 @@ GRAMMAR = GRAMMAR_DEFAULT
 
 # VAD 参数（用于预过滤静音）
 VAD_ENERGY_THRESHOLD = -40.0  # dB，低于此值认为是静音
-VAD_HISTORY_FRAMES = 10       # 保留最近 N 帧用于判断
+VAD_HISTORY_FRAMES = 10       # 保留最近 N 帧用于能量平均判断
+VAD_LOOKBACK_FRAMES = 15      # 回溯窗口：检测到语音后往前看多少帧（约 300ms）
 
 # Globals
 model = None
@@ -41,6 +42,7 @@ counter_lock = threading.Lock()
 
 # VAD 状态
 energy_history = deque(maxlen=VAD_HISTORY_FRAMES)
+audio_buffer = deque(maxlen=VAD_LOOKBACK_FRAMES)  # 回溯缓冲区
 is_speaking = False
 
 
@@ -52,8 +54,8 @@ def calculate_energy_db(audio_bytes):
 
 
 def audio_callback(indata, frames, time, status):
-    """音频输入回调，添加 VAD 预过滤"""
-    global is_speaking, energy_history
+    """音频输入回调，添加 VAD 预过滤 + 回溯机制"""
+    global is_speaking, energy_history, audio_buffer
     
     if stop_event.is_set():
         return
@@ -63,16 +65,24 @@ def audio_callback(indata, frames, time, status):
     energy_history.append(energy_db)
     
     # 判断是否有语音活动
-    # 如果最近几帧的平均能量高于阈值，认为有语音
     if len(energy_history) == energy_history.maxlen:
         avg_energy = sum(energy_history) / len(energy_history)
         has_voice = avg_energy > VAD_ENERGY_THRESHOLD
         
-        if has_voice or is_speaking:
-            # 有语音活动，或者正在说话（避免截断）
+        if not is_speaking:
+            # 静音期间：保存到回溯缓冲区
+            audio_buffer.append(audio_bytes)
+            
+            if has_voice:
+                # 语音刚开始：回溯发送缓冲区中的所有帧
+                for buffered_audio in audio_buffer:
+                    audio_queue.put(buffered_audio)
+                audio_buffer.clear()  # 清空缓冲区
+                is_speaking = True
+        else:
+            # 语音持续中：直接发送当前帧
             audio_queue.put(audio_bytes)
-            is_speaking = has_voice
-        # else: 纯静音，丢弃不送给 Vosk
+            is_speaking = has_voice  # 更新状态（可能结束）
 
 
 def recognition_worker(debug=False):

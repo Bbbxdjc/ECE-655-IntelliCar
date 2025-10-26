@@ -21,7 +21,7 @@ class LLMConfig:
     def __init__(self):
         self.endpoint = os.environ.get("OPENAI_BASE_URL", "https://models.github.ai/inference")
         self.model_name = os.environ.get("OPENAI_MODEL", "openai/gpt-4o-mini")
-        self.api_key = os.environ.get("GITHUB_TOKEN", "")
+        self.api_key = os.environ.get("OPENAI_API_KEY", "")
         
         # 业务约束
         self.actions = {"forward", "backward", "left", "right", "stop"}

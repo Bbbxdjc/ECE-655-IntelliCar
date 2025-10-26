@@ -36,7 +36,7 @@ RMS_WIN_MS        = 200
 RMS_THRESH_DB     = -35.0
 RMS_HANG_MS_ON    = 120     # 连续多久的语音才触发"开始"
 RMS_HANG_MS_OFF   = 450     # 连续多久的静音才触发"结束"
-RMS_LOOKBACK_MS   = 300     # 回溯窗口：检测到语音后往前看多久
+RMS_LOOKBACK_MS   = 500     # 回溯窗口：检测到语音后往前看多久
 RMS_FLOOR_DECAY   = 0.995
 
 # 业务约束
