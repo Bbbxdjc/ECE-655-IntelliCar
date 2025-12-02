@@ -122,6 +122,8 @@ audio_history_lock = threading.Lock()
 audio_frame_cursor = 0
 max_audio_frames = AUDIO_RING_SECONDS * SAMPLE_RATE
 
+COMMAND_FIELDS = ("action", "duration_ms", "angle_deg", "speed")
+
 
 # ================== 通用工具 ==================
 def ensure_token() -> str:
@@ -187,6 +189,13 @@ def extract_audio_segment_frames(start_frame: Optional[int], end_frame: Optional
         if not pieces:
             return None
         return b"".join(pieces)
+
+
+def emit_command_payload(cmd: Dict[str, Any], seg_id: int):
+    """Print a single command JSON line compatible with vosk_cerebras output."""
+    payload = {field: cmd.get(field) for field in COMMAND_FIELDS}
+    payload["id"] = seg_id
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 def enqueue_segment_for_llm(segment_info: Dict[str, Any]):
@@ -437,10 +446,10 @@ def recognition_worker(debug: bool = False):
             if grammar_perfect and grammar_text:
                 try:
                     local_command = to_structured(grammar_text, debug=debug)
-                    local_command["id"] = seg_id
-                    compact = json.dumps(local_command, ensure_ascii=False, separators=(",", ":"))
-                    print(f"📄 Local raw (segment #{seg_id}): {compact}")
+                    emit_command_payload(local_command, seg_id)
                     local_output_emitted = True
+                    if debug:
+                        print(f"  ✅ Local parser emitted command for segment #{seg_id}")
                 except Exception as exc:
                     fallback_reasons.append(f"parse-error:{exc}")
                     if debug:
@@ -519,8 +528,9 @@ def recognition_worker(debug: bool = False):
                     print(f"\r💭 {partial:<50}", end="", flush=True)
 
 
-def whisper_worker(worker_id: int, print_stt: bool = True, debug: bool = False):
+def whisper_worker(worker_id: int, debug: bool = False):
     """Consume fallback segments, cut audio, run Whisper, then forward to LLM queue."""
+    # Keep STT logging centralized inside llm_worker to avoid duplicate lines.
     global whisper_model
     while not stop_event.is_set():
         try:
@@ -573,9 +583,6 @@ def whisper_worker(worker_id: int, print_stt: bool = True, debug: bool = False):
             segment_info["whisper_transcribe_ms"] = round(whisper_ms, 2)
         if debug:
             print(f"  🌀 Whisper text (segment #{seg_id}): {whisper_text}")
-
-        if print_stt:
-            print(f"🌀 Whisper STT (segment #{seg_id}): {whisper_text or '(empty)'}")
 
         enqueue_segment_for_llm(segment_info)
         whisper_queue.task_done()
@@ -704,8 +711,7 @@ def llm_worker(print_stt: bool = True):
 
             if not model_call_failed and data is not None:
                 for cmd in data["commands"]:
-                    cmd["id"] = seg_id
-                    print(json.dumps(cmd, ensure_ascii=False, separators=(",", ":")))
+                    emit_command_payload(cmd, seg_id)
             else:
                 if isinstance(validation_error, SystemExit):
                     print(
@@ -835,7 +841,6 @@ def main():
             target=whisper_worker,
             kwargs={
                 "worker_id": idx,
-                "print_stt": not args.no_print_stt,
                 "debug": args.debug,
             },
             daemon=True,
