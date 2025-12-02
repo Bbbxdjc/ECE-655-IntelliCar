@@ -88,6 +88,16 @@ def to_structured(text, debug=False):
             print(f"  └─ 输出: {result}")
         return result
     
+    # Quick U-turn helper (defaults to 180° left turn)
+    if "turn around" in t:
+        result["action"] = "left"
+        result["angle_deg"] = 180
+
+        if debug:
+            print(f"  ├─ 识别: 掉头 (turn around)")
+            print(f"  └─ 输出: {result}")
+        return result
+
     # Check for forward/backward
     if "forward" in t:
         result["action"] = "forward"
