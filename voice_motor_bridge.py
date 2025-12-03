@@ -13,6 +13,8 @@ import sys
 import time
 import signal
 import subprocess
+import threading
+import queue
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -63,7 +65,21 @@ DEFAULT_SPEED = "L1"
 TURN_SPEED = 60
 DEFAULT_DURATION_MS = 1500
 SETTLE_GAP_S = 0.2
+COMMAND_QUEUE_MAX = 50
+MAX_STOP_GUARD_DELTA = 10.0
 
+command_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=COMMAND_QUEUE_MAX)
+motor_stop_event = threading.Event()
+motor_thread: Optional[threading.Thread] = None
+
+
+def _limit_guard_adjustment(candidate: float, baseline: float) -> float:
+    delta = candidate - baseline
+    if delta > MAX_STOP_GUARD_DELTA:
+        return baseline + MAX_STOP_GUARD_DELTA
+    if delta < -MAX_STOP_GUARD_DELTA:
+        return max(0.0, baseline - MAX_STOP_GUARD_DELTA)
+    return max(0.0, candidate)
 
 # ---------- Motor primitives ----------
 def stop_car():
@@ -218,11 +234,17 @@ def turn_precisely_deg(angle_deg: int, duty: int):
     print(f"转弯完毕! 实际转动: {final_angle:.2f} 度，偏差 {overshoot:+.2f} 度")
 
     if overshoot > 0.5:
-        stop_guard_dynamic = min(target_abs * 0.7, stop_guard + overshoot * 0.8)
-        print(f"[调参] 检测到过冲，stop_guard 调整为 {stop_guard_dynamic:.2f}")
+        candidate = min(target_abs * 0.7, stop_guard + overshoot * 0.8)
+        clamped = _limit_guard_adjustment(candidate, base_stop_guard)
+        note = f" (限制 ±{MAX_STOP_GUARD_DELTA:.0f}°)" if clamped != candidate else ""
+        stop_guard_dynamic = clamped
+        print(f"[调参] 检测到过冲，stop_guard 调整为 {stop_guard_dynamic:.2f}{note}")
     elif overshoot < -0.5:
-        stop_guard_dynamic = max(base_stop_guard * 0.5, stop_guard * 0.7)
-        print(f"[调参] 检测到欠冲，stop_guard 调整为 {stop_guard_dynamic:.2f}")
+        candidate = max(base_stop_guard * 0.5, stop_guard * 0.7)
+        clamped = _limit_guard_adjustment(candidate, base_stop_guard)
+        note = f" (限制 ±{MAX_STOP_GUARD_DELTA:.0f}°)" if clamped != candidate else ""
+        stop_guard_dynamic = clamped
+        print(f"[调参] 检测到欠冲，stop_guard 调整为 {stop_guard_dynamic:.2f}{note}")
     else:
         stop_guard_dynamic = stop_guard
         print(f"[调参] stop_guard 保持为 {stop_guard_dynamic:.2f}")
@@ -254,6 +276,71 @@ def execute_command(cmd: Dict[str, Any]):
     time.sleep(SETTLE_GAP_S)
 
 
+def motor_worker():
+    while not motor_stop_event.is_set():
+        try:
+            cmd = command_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        if cmd is None:
+            command_queue.task_done()
+            break
+        try:
+            execute_command(cmd)
+        finally:
+            command_queue.task_done()
+
+    while True:
+        try:
+            cmd = command_queue.get_nowait()
+        except queue.Empty:
+            break
+        if cmd is not None:
+            execute_command(cmd)
+        command_queue.task_done()
+
+
+def start_motor_worker():
+    global motor_thread
+    if motor_thread is not None and motor_thread.is_alive():
+        return motor_thread
+    motor_stop_event.clear()
+    motor_thread = threading.Thread(target=motor_worker, daemon=True)
+    motor_thread.start()
+    return motor_thread
+
+
+def stop_motor_worker():
+    global motor_thread
+    if motor_thread is None:
+        motor_stop_event.set()
+        return
+    motor_stop_event.set()
+    inserted = False
+    while not inserted:
+        try:
+            command_queue.put_nowait(None)
+            inserted = True
+        except queue.Full:
+            try:
+                command_queue.get_nowait()
+                command_queue.task_done()
+            except queue.Empty:
+                break
+    motor_thread.join(timeout=5.0)
+    motor_thread = None
+
+
+def enqueue_motor_command(cmd: Dict[str, Any]):
+    while not motor_stop_event.is_set():
+        try:
+            command_queue.put(cmd, timeout=0.1)
+            return True
+        except queue.Full:
+            continue
+    return False
+
+
 # ---------- Vosk runner ----------
 def start_vosk_process():
     if not VOSK_SCRIPT.exists():
@@ -280,9 +367,12 @@ def consume_vosk(proc):
             keys = {"action", "duration_ms", "angle_deg", "speed"}
             if not keys.issubset(payload.keys()):
                 continue
+            if "id" not in payload or payload.get("id") is None:
+                continue
             seg_id = payload.get("id")
             print(f"🛠️  执行命令 (segment #{seg_id}): {payload}")
-            execute_command(payload)
+            if not enqueue_motor_command(payload):
+                print("⚠️ Motor queue stopped; command丢弃", file=sys.stderr)
     finally:
         proc.terminate()
         proc.wait(timeout=3)
@@ -290,6 +380,7 @@ def consume_vosk(proc):
 
 # ---------- Cleanup ----------
 def cleanup():
+    stop_motor_worker()
     stop_car()
     pwm_a.stop()
     pwm_b.stop()
@@ -299,6 +390,7 @@ def cleanup():
 def main():
     global gyro_offset_z
     gyro_offset_z = calibrate_gyro()
+    start_motor_worker()
     proc = start_vosk_process()
 
     def handle_signal(signum, frame):

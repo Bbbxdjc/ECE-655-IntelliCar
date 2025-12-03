@@ -70,7 +70,7 @@ SYSTEM_PROMPT = (
     "Rules per item:\n"
     "- action ∈ ['forward','backward','left','right','stop'].\n"
     "- If action is 'left' or 'right': angle_deg is an integer 1..360, duration_ms is null.\n"
-    "- If action is 'forward' or 'backward': duration_ms is an integer 0..1000, angle_deg is null.\n"
+    "- If action is 'forward' or 'backward': duration_ms is an integer 0..2000, angle_deg is null.\n"
     "- If action is 'stop': both duration_ms and angle_deg are null.\n"
     "- speed is optional: set to 'L0'/'L1'/'L2'/'L3' if specified, otherwise null.\n"
     "Do not include any other keys. Preserve the order the user spoke."
@@ -84,7 +84,7 @@ GRAMMAR = GRAMMAR_DEFAULT
 LLM_MAX_WORKERS = int(os.environ.get("LLM_MAX_WORKERS", "3"))
 
 # ================== Whisper 配置 ==================
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
 WHISPER_LANGUAGE_HINT = os.environ.get("WHISPER_LANGUAGE", "en")
@@ -93,11 +93,16 @@ WHISPER_PAD_SECONDS = float(os.environ.get("WHISPER_PAD_SECONDS", "0.2"))
 AUDIO_RING_SECONDS = int(os.environ.get("AUDIO_RING_SECONDS", "60"))
 SAMPLE_RATE = 16000
 BYTES_PER_SAMPLE = 2
+AUDIO_BLOCK_SIZE = int(os.environ.get("AUDIO_BLOCK_SIZE", "4096"))
+AUDIO_BLOCK_SIZE = max(512, min(AUDIO_BLOCK_SIZE, 4000))
+AUDIO_QUEUE_MAX = int(os.environ.get("AUDIO_QUEUE_MAX", "18"))
+AUDIO_QUEUE_MAX = max(3, AUDIO_QUEUE_MAX)
 
 model = None
 rec_grammar = None
 rec_no_grammar = None
-audio_queue: "queue.Queue[bytes]" = queue.Queue()
+# Bound audio queue prevents unbounded growth when block size shrinks.
+audio_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=AUDIO_QUEUE_MAX)
 segment_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 whisper_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 stop_event = threading.Event()
@@ -261,7 +266,8 @@ def validate_payload_multi(data: Dict[str, Any]) -> Dict[str, Any]:
                 raise SystemExit(f"❌ commands[{idx}] duration_ms must be null for turn.")
         elif action in {"forward", "backward"}:
             if duration_ms is None:
-                raise SystemExit(f"❌ commands[{idx}] duration_ms must be integer for straight move.")
+                duration_ms = 0.5
+                #raise SystemExit(f"❌ commands[{idx}] duration_ms must be integer for straight move.")
             if not isinstance(duration_ms, int) or not (0 <= duration_ms <= MAX_DURATION):
                 raise SystemExit(f"❌ commands[{idx}] invalid duration_ms: {duration_ms}")
             if angle_deg is not None:
@@ -332,7 +338,17 @@ def audio_callback(indata, frames, time_info, status):
 
     audio_bytes = bytes(indata)
     store_audio_history(audio_bytes)
-    audio_queue.put(audio_bytes)
+    try:
+        audio_queue.put_nowait(audio_bytes)
+    except queue.Full:
+        try:
+            audio_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            audio_queue.put_nowait(audio_bytes)
+        except queue.Full:
+            pass
 
 
 def recognition_worker(debug: bool = False):
@@ -767,10 +783,10 @@ def init_vosk(model_path: str):
         sys.exit(1)
 
     try:
-        rec_grammar = KaldiRecognizer(model, 16000, json.dumps(GRAMMAR))
+        rec_grammar = KaldiRecognizer(model, SAMPLE_RATE, json.dumps(GRAMMAR))
         rec_grammar.SetWords(True)
 
-        rec_no_grammar = KaldiRecognizer(model, 16000)
+        rec_no_grammar = KaldiRecognizer(model, SAMPLE_RATE)
         rec_no_grammar.SetWords(True)
 
         print("Dual-path Vosk recognizers initialized (grammar + no-grammar).")
@@ -823,6 +839,8 @@ def main():
     print(f"   - Vosk model: {args.model}")
     print(f"   - Device: {device_index if device_index is not None else '(default)'}")
     print(f"   - Debug: {'ON' if args.debug else 'OFF'}")
+    block_ms = (AUDIO_BLOCK_SIZE / SAMPLE_RATE) * 1000.0
+    print(f"   - Audio blocksize: {AUDIO_BLOCK_SIZE} frames (~{block_ms:.0f} ms)")
     print("   - Local: grammar/no-grammar perfect matches parsed via `parse_en`")
     print("   - Fallback: optional Whisper upgrade before Cerebras/OpenAI LLM")
     print("Press Ctrl+C to stop.\n")
@@ -860,8 +878,8 @@ def main():
 
     try:
         with sd.RawInputStream(
-            samplerate=16000,
-            blocksize=8000,
+            samplerate=SAMPLE_RATE,
+            blocksize=AUDIO_BLOCK_SIZE,
             dtype="int16",
             channels=1,
             callback=audio_callback,
