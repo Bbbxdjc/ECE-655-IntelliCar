@@ -1,0 +1,11 @@
+numpy>=1.24
+sounddevice>=0.4.6
+vosk>=0.3.45
+faster-whisper>=1.0.3
+openai>=1.55
+python-dotenv>=1.0.0
+
+# Hardware-specific packages (install on Raspberry Pi only)
+RPi.GPIO>=0.7.1; sys_platform == "linux"
+adafruit-blinka>=8.52.0; sys_platform == "linux"
+adafruit-circuitpython-mpu6050>=2.5.21; sys_platform == "linux"
