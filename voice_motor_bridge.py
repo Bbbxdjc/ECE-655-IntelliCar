@@ -26,7 +26,7 @@ import adafruit_mpu6050
 
 # ---------- Paths ----------
 REPO_ROOT = Path(__file__).resolve().parent
-VOSK_SCRIPT = REPO_ROOT / "local_processing" / "vosk_whisper_llm.py"
+VOSK_SCRIPT = REPO_ROOT / "vosk_whisper_llm.py"
 
 # ---------- Motor GPIO ----------
 INT1 = 17

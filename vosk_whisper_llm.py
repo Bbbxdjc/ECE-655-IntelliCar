@@ -77,7 +77,7 @@ SYSTEM_PROMPT = (
 )
 
 # ================== Vosk 配置 ==================
-DEFAULT_MODEL_PATH = os.environ.get("VOSK_MODEL_PATH", "./local_processing/vosk_models/en-small")
+DEFAULT_MODEL_PATH = os.environ.get("VOSK_MODEL_PATH", "./vosk_models/en-small")
 ENV_DEVICE_INDEX   = os.environ.get("VOSK_DEVICE_INDEX")
 GRAMMAR = GRAMMAR_DEFAULT
 
@@ -579,6 +579,7 @@ def whisper_worker(worker_id: int, debug: bool = False):
                     language=WHISPER_LANGUAGE_HINT,
                     without_timestamps=True,
                     vad_filter=False,
+                    beam_size=1,
                 )
             whisper_ms = (time.perf_counter() - t_whisper) * 1000.0
             whisper_text = "".join(seg.text for seg in segments).strip()
