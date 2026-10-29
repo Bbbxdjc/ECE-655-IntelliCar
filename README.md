@@ -1,5 +1,9 @@
 # IntelliCar Hybrid Voice-Controlled Rover
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+Duke University ECE 655L course project.
+
 Realtime speech-to-motion stack for the IntelliCar (ECE-655) platform. The Pi listens with Vosk, optionally retries hard segments with Whisper plus a JSON-mode LLM, and drives the chassis with closed-loop IMU feedback.
 
 ## Highlights
@@ -124,5 +128,12 @@ Use these to sanity-check the full path (speech -> JSON -> motor queue):
 - "Drive a five-pointed star shape."
 The recognizer should emit one JSON line per action. With `voice_motor_bridge.py` running, each line is echoed before the motor worker executes it.
 
+## Team
+
+- [Yifan Xu](https://github.com/yxu-dev)
+- [Yihang Zou](https://github.com/Bbbxdjc)
+- [Yuchu Guo](https://github.com/williamguo34)
+
 ## License
-Duke University ECE-655 course project.
+
+This project is licensed under the [MIT License](LICENSE).
